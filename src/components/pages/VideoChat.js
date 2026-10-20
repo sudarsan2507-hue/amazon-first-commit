@@ -1,10 +1,11 @@
 /* eslint-disable no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from 'react';
 import styled, { keyframes, css } from 'styled-components';
-import { FiVideo, FiMic, FiMicOff, FiSkipForward, FiSkipBack, FiUsers, FiSend, FiSmile, FiMessageCircle, FiSquare, FiZap, FiHeadphones, FiPlay } from 'react-icons/fi';
+import { FiVideo, FiMic, FiMicOff, FiSkipForward, FiSkipBack, FiUsers, FiSend, FiSmile, FiMessageCircle, FiSquare, FiZap, FiHeadphones, FiPlay, FiPhone } from 'react-icons/fi';
 import SimplePeer from 'simple-peer';
 import Header from '../layout/Header';
 import { socketService } from '../../utils/socketService';
+import { useCallModeSwitch } from '../../utils/useCallModeSwitch';
 import { getRtcConfig, ESTABLISHMENT_DELAY_THRESHOLD_MS, STUN_SERVERS } from '../../utils/webrtcStun';
 import { createInitialState, applyMove as applyChessMove } from '../../utils/chessEngine';
 import {
@@ -178,6 +179,22 @@ const RemoteBufferOverlay = styled.div`
   align-items: center;
   justify-content: center;
   background: rgba(28, 28, 30, 0.72);
+`;
+
+const CallModeNotice = styled.div`
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: ${({ theme }) => theme.colors.paper};
+  color: ${({ theme }) => theme.colors.ink};
+  border: 1.5px solid ${({ theme }) => theme.colors.ink};
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
 `;
 
 const VideoOverlayButton = styled.button`
@@ -1146,6 +1163,35 @@ function VideoChat() {
   const connectionStartTimeRef = useRef(null);
   const establishmentRecordedRef = useRef(false);
 
+  // Re-point the self view after the camera track is swapped
+  const refreshLocalVideo = () => {
+    const video = localVideoRef.current;
+    const stream = localStreamRef.current;
+    if (!video || !stream) return;
+    video.srcObject = null;
+    video.srcObject = stream;
+    video.play?.().catch(() => {});
+  };
+
+  const {
+    callMode,
+    incomingVideoRequest,
+    awaitingVideoAnswer,
+    switchNotice,
+    switchToVoice,
+    requestVideo,
+    acceptVideoRequest,
+    declineVideoRequest,
+    handleCallModeMessage,
+    resetCallMode,
+    waitForCallMedia,
+  } = useCallModeSwitch({
+    peerRef: peerConnectionRef,
+    localStreamRef,
+    initialMode: 'video',
+    onLocalVideoChange: refreshLocalVideo,
+  });
+
   const recordEstablishmentTime = () => {
     if (establishmentRecordedRef.current) return;
     establishmentRecordedRef.current = true;
@@ -1312,6 +1358,7 @@ function VideoChat() {
           const text = new TextDecoder().decode(data);
           let obj = null;
           try { obj = JSON.parse(text); } catch (_) {}
+          if (handleCallModeMessage(obj)) return;
           if (obj && obj.type === 'chess-move') {
             setChessState((prev) => {
               const next = applyChessMove(prev, { from: obj.from, to: obj.to, promotion: obj.promotion });
@@ -1477,6 +1524,7 @@ function VideoChat() {
       localStreamRef.current.getAudioTracks().forEach(t => t.enabled = true);
     }
     cleanupPeer();
+    resetCallMode();
     triggerRemoteBuffer(true); // Keep visible while waiting in queue
     // Small delay to ensure cleanup is complete before rejoining at END of queue (FIFO)
     setTimeout(() => {
@@ -1720,6 +1768,7 @@ function VideoChat() {
     
     cleanupPeer();
     cleanupStreams();
+    resetCallMode();
     socketService.disconnect();
     partnerIdRef.current = null;
   };
@@ -1761,9 +1810,10 @@ function VideoChat() {
 
   const skipPartner = async () => {
     if (!isStarted) return;
-    
+
     cleanupPeer();
-    
+    resetCallMode();
+
     setIsConnected(false);
     setIsWaiting(true);
     setWaitingMessage('');
@@ -2002,6 +2052,8 @@ function VideoChat() {
       socketService.send({ type: 'acknowledge' });
       console.log('[ws] acknowledged match with', data.partnerId);
 
+      // Camera may still be coming back if the last call ended in voice-only mode
+      await waitForCallMedia();
       await setupWebRTC(data.initiator);
     };
 
@@ -2139,6 +2191,8 @@ function VideoChat() {
   // On mobile, use the full-screen video layout by default (WhatsApp-style) whenever not in FUN mode.
   const isMobileFullscreen = !isFunMode;
 
+  const isVoiceOnly = callMode === 'voice';
+
   return (
     <VideoChatContainer>
       {pendingFunRequest && (
@@ -2203,12 +2257,20 @@ function VideoChat() {
                   <div>Stranger</div>
                 </VideoPlaceholder>
               )}
+              {/* Voice-only: the <video> stays mounted underneath because it plays the stranger's audio */}
+              {isConnected && isVoiceOnly && (
+                <VideoPlaceholder style={{ position: 'absolute', inset: 0 }}>
+                  <FiPhone />
+                  <div>Voice only</div>
+                </VideoPlaceholder>
+              )}
               {showRemoteBuffer && (
                 <RemoteBufferOverlay>
                   <BufferSpinner />
                 </RemoteBufferOverlay>
               )}
               <VideoLabel>Stranger</VideoLabel>
+              {switchNotice && <CallModeNotice>{switchNotice}</CallModeNotice>}
               <MobileVideoControls $hasSession={isStarted && !isFunMode}>
                 {!isStarted ? (
                   <MobileControlButton
@@ -2319,6 +2381,11 @@ function VideoChat() {
                         <VideoPlaceholder>
                           <FiVideo />
                           <div>Your Camera</div>
+                        </VideoPlaceholder>
+                      )}
+                      {hasLocalStream && isVoiceOnly && (
+                        <VideoPlaceholder style={{ position: 'absolute', inset: 0 }} title="Camera off">
+                          <FiMic />
                         </VideoPlaceholder>
                       )}
                       <VideoOverlayButton
