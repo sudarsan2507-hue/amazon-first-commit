@@ -200,7 +200,9 @@ const RemoteBufferOverlay = styled.div`
 
 /* Live video upgrade: the stranger fills the stage, your camera sits top-left
    (the mic tile already owns the opposite corner). Both are muted - sound
-   keeps playing through the hidden <audio>. */
+   keeps playing through the hidden <audio>. The stage is transparent so the
+   voice view stays visible until the stranger's first frames arrive, instead
+   of a black screen while their camera starts. */
 const StageVideo = styled.video`
   position: absolute;
   inset: 0;
@@ -208,7 +210,7 @@ const StageVideo = styled.video`
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: #000;
+  background: transparent;
   transform: scaleX(-1);
 `;
 
@@ -247,7 +249,9 @@ const CallModeNotice = styled.div`
   border: 1.5px solid ${({ theme }) => theme.colors.ink};
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: center;
+  width: max-content;
+  max-width: calc(100% - 32px);
 `;
 
 const AudioOverlayButton = styled.button`

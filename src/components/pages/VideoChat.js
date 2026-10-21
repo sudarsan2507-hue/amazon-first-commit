@@ -195,7 +195,9 @@ const CallModeNotice = styled.div`
   border: 1.5px solid ${({ theme }) => theme.colors.ink};
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: center;
+  width: max-content;
+  max-width: calc(100% - 32px);
 `;
 
 const VideoOverlayButton = styled.button`
@@ -1274,7 +1276,11 @@ function VideoChat() {
       setError('');
       return true;
     } catch (err) {
-      setError('Camera blocked. Please enable it and try again.');
+      // A camera held by another app or browser tab is not a permission problem
+      const busy = err?.name === 'NotReadableError' || err?.name === 'AbortError';
+      setError(busy
+        ? 'Your camera is in use by another app or browser. Close it and try again.'
+        : 'Camera blocked. Please enable it and try again.');
       console.error('Error accessing camera:', err);
       setIsStarted(false);
       return false;
