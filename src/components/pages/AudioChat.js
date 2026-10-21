@@ -6,6 +6,7 @@ import SimplePeer from 'simple-peer';
 import Header from '../layout/Header';
 import { socketService } from '../../utils/socketService';
 import { useCallModeSwitch, showVideoTrack } from '../../utils/useCallModeSwitch';
+import { watchPeerConnection } from '../../utils/connectionWatchdog';
 import { getRtcConfig, ESTABLISHMENT_DELAY_THRESHOLD_MS, STUN_SERVERS } from '../../utils/webrtcStun';
 import { createInitialState, applyMove as applyChessMove } from '../../utils/chessEngine';
 import ChessBoard from '../ui/ChessBoard';
@@ -1333,18 +1334,10 @@ function AudioChat() {
       });
       const pc = peer._pc;
       if (pc) {
-        pc.oniceconnectionstatechange = () => {
-          const state = pc.iceConnectionState;
-          if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-            resetForRequeue('Connection lost. Rejoining queue...');
-          }
-        };
-        pc.onconnectionstatechange = () => {
-          const state = pc.connectionState;
-          if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-            resetForRequeue('Connection lost. Rejoining queue...');
-          }
-        };
+        // A brief 'disconnected' (e.g. while a camera starts) recovers by itself; only requeue if it lasts
+        watchPeerConnection(pc, () => {
+          if (peerConnectionRef.current === peer) resetForRequeue('Connection lost. Rejoining queue...');
+        });
       }
     } catch (error) {
       console.error('Error setting up WebRTC:', error);
