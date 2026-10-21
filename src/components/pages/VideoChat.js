@@ -195,7 +195,9 @@ const CallModeNotice = styled.div`
   border: 1.5px solid ${({ theme }) => theme.colors.ink};
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: center;
+  width: max-content;
+  max-width: calc(100% - 32px);
 `;
 
 const VideoOverlayButton = styled.button`
