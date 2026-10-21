@@ -1276,7 +1276,11 @@ function VideoChat() {
       setError('');
       return true;
     } catch (err) {
-      setError('Camera blocked. Please enable it and try again.');
+      // A camera held by another app or browser tab is not a permission problem
+      const busy = err?.name === 'NotReadableError' || err?.name === 'AbortError';
+      setError(busy
+        ? 'Your camera is in use by another app or browser. Close it and try again.'
+        : 'Camera blocked. Please enable it and try again.');
       console.error('Error accessing camera:', err);
       setIsStarted(false);
       return false;
