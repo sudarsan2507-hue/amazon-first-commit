@@ -19,8 +19,45 @@ import { useState, useRef } from 'react';
  */
 
 const REQUEST_TIMEOUT_MS = 30000;
-const NOTICE_MS = 3500;
+const NOTICE_MS = 5000;
 const TRANSCEIVER_WAIT_MS = 10000;
+// A camera held by another app/browser can make getUserMedia hang (Edge: ~12s) before failing
+const CAMERA_START_TIMEOUT_MS = 8000;
+
+// What to tell the user when their own camera would not start
+export const cameraErrorMessage = (err) => {
+  const name = err?.name;
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Camera blocked. Allow camera access to switch to video.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return 'No camera found on this device.';
+  }
+  // NotReadableError / AbortError / timeout: the device exists but someone else has it
+  return 'Your camera is in use by another app or browser. Close it and try again.';
+};
+
+const openCamera = () => new Promise((resolve, reject) => {
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    const err = new Error('Camera did not start in time');
+    err.name = 'TimeoutError';
+    reject(err);
+  }, CAMERA_START_TIMEOUT_MS);
+  navigator.mediaDevices.getUserMedia({ video: true }).then(
+    (stream) => {
+      clearTimeout(timer);
+      // Too late: we already gave up, so release the camera again
+      if (timedOut) stream.getTracks().forEach((t) => t.stop());
+      else resolve(stream);
+    },
+    (err) => {
+      clearTimeout(timer);
+      if (!timedOut) reject(err);
+    }
+  );
+});
 
 const findVideoTransceiver = (peer) => {
   const pc = peer?._pc;
@@ -126,7 +163,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
     const peer = peerRef.current;
     if (!localStreamRef.current || !peer) return null;
     try {
-      const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const camStream = await openCamera();
       const track = camStream.getVideoTracks()[0];
       // The call ended or moved to a new partner while the permission prompt was open
       if (peerRef.current !== peer) {
@@ -136,7 +173,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
       return track;
     } catch (err) {
       console.error('Camera access failed', err);
-      showNotice('Camera blocked. Allow camera access to switch to video.');
+      showNotice(cameraErrorMessage(err));
       return null;
     }
   };
@@ -189,7 +226,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
     setAwaiting(false);
     const track = await acquireCamera();
     if (!track) {
-      sendControl('decline-video');
+      sendControl('camera-unavailable');
       return;
     }
     // Accept before attaching: a non-initiator waits for the initiator's video m-line,
@@ -222,7 +259,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
         setAwaiting(false);
         acquireCamera().then((track) => {
           if (!track) {
-            sendControl('to-voice');
+            sendControl('camera-unavailable');
             return;
           }
           setCallMode('video');
@@ -232,6 +269,16 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
       case 'decline-video':
         setAwaiting(false);
         showNotice('Stranger wants to stay on voice.');
+        break;
+      // The partner agreed (or asked) but their camera would not start: settle back on voice
+      case 'camera-unavailable':
+        setIncomingVideoRequest(false);
+        setAwaiting(false);
+        if (callModeRef.current !== 'voice') {
+          stopLocalVideo();
+          setCallMode('voice');
+        }
+        showNotice("Stranger's camera isn't available, so the call stays on voice.");
         break;
       case 'to-voice':
         setIncomingVideoRequest(false);
