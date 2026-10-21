@@ -226,7 +226,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
     setAwaiting(false);
     const track = await acquireCamera();
     if (!track) {
-      sendControl('decline-video');
+      sendControl('camera-unavailable');
       return;
     }
     // Accept before attaching: a non-initiator waits for the initiator's video m-line,
@@ -259,7 +259,7 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
         setAwaiting(false);
         acquireCamera().then((track) => {
           if (!track) {
-            sendControl('to-voice');
+            sendControl('camera-unavailable');
             return;
           }
           setCallMode('video');
@@ -269,6 +269,16 @@ export function useCallModeSwitch({ peerRef, localStreamRef, initialMode, onLoca
       case 'decline-video':
         setAwaiting(false);
         showNotice('Stranger wants to stay on voice.');
+        break;
+      // The partner agreed (or asked) but their camera would not start: settle back on voice
+      case 'camera-unavailable':
+        setIncomingVideoRequest(false);
+        setAwaiting(false);
+        if (callModeRef.current !== 'voice') {
+          stopLocalVideo();
+          setCallMode('voice');
+        }
+        showNotice("Stranger's camera isn't available, so the call stays on voice.");
         break;
       case 'to-voice':
         setIncomingVideoRequest(false);
